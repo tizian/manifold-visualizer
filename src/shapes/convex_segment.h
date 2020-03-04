@@ -3,86 +3,151 @@
 #include <shape.h>
 #include <nanovg.h>
 
-class CircleSegment : public Shape {
+class ConvexSegment : public Shape {
 public:
-    CircleSegment(const Point2f &a, const Point2f &b, float arc_radius)
-        : Shape(), m_a(a), m_b(b), m_arc_radius(arc_radius) {
+    ConvexSegment(const Point2f &a, const Point2f &b, float arc_radius, bool alt)
+        : Shape(), m_a(a), m_b(b), m_arc_radius(arc_radius), m_alt(alt) {
+            name = "ConvexSegment";
+
             Vector2f dir = m_b - m_a;
             float length = norm(dir);
             Vector2f n(-dir[1], dir[0]);
             n *= rcp(length);
             float phi = atan2(n.y(), n.x());
+            if (phi < 0.f) phi += 2.f*Pi;
+
             float d_phi = asin(0.5f*length*rcp(m_arc_radius));
             m_phi_0 = phi + d_phi;
             m_phi_1 = phi - d_phi;
+            float sign = 1.f;
+            if (alt) {
+                sign = -1.f;
+                m_phi_0 -= Pi;
+                m_phi_1 += Pi;
+            }
 
             float offset = safe_sqrt(sqr(m_arc_radius) - sqr(0.5f*length));
-            m_center = 0.5f*(m_a + m_b) - n*offset;
+            m_center = 0.5f*(m_a + m_b) - sign*n*offset;
+
+            size_t K = 30;
+            bbox = BoundingBox2f();
+            for (size_t k = 0; k < K; ++k) {
+                float t = k * rcp(float(K-1));
+                Interaction it = sample_position(t);
+                bbox.expand(it.p);
+            }
         }
 
     Interaction sample_position(float sample) const override {
-        float phi = lerp(sample, m_phi_0, m_phi_1);
+        float phi = m_phi_0 + (m_phi_1 - m_phi_0)*sample;
         auto [sp, cp] = sincos(phi);
         Point2f p_local(cp, sp);
 
         Interaction in;
+        in.rayt = 0;
         in.p = m_center + m_arc_radius*p_local;
         in.n = p_local;
-        in.s = Vector2f(-in.n[1], in.n[0]);
-        in.dp_du = 2.f*Pi*Vector2f(-p_local[1], p_local[0]);
+        in.dp_du = (m_phi_1 - m_phi_0)*Vector2f(-p_local[1], p_local[0]);
         float inv_radius = rcp(m_arc_radius);
         in.dn_du = in.dp_du*inv_radius;
         in.u = sample;
+        in.s = Vector2f(-in.n[1], in.n[0]);
+        in.ds_du = Vector2f(-in.dn_du[1], in.dn_du[0]);
         in.shape = this;
         return in;
     }
 
+    std::tuple<float, float, float> angle_test(const Point2f &p) const {
+        // Compute extent of valid angles
+        Vector2f dir = m_b - m_a;
+        float length = norm(dir);
+        float d_phi = asin(0.5f*length*rcp(m_arc_radius));
+        if (m_alt) {
+            d_phi = Pi - d_phi;
+        }
+
+        // Project to circle
+        Vector2f d = normalize(p - m_center);
+        float phi = atan2(d.y(), d.x());
+        if (phi < 0.f) phi += 2.f*Pi;
+
+        // Rotate everything s.t. it alignes with the normal of [A, B]
+        Vector2f n(-dir[1], dir[0]);
+        n *= rcp(length);
+        float phi_n = atan2(n.y(), n.x());
+        if (phi_n < 0.f) phi_n += 2.f*Pi;
+        float phi_p = phi - phi_n;
+
+        // Make sure, phi_p is in [-Pi, +Pi)
+        phi_p = fmod(phi_p + Pi, 2.f*Pi);
+        if (phi_p < 0.f) phi_p += 2.f*Pi;
+        phi_p -= Pi;
+
+        return std::make_tuple(phi, phi_p, d_phi);
+    }
+
     float project(const Point2f &p) const override {
-        // Vector2f v = m_b - m_a;
-        // float scale = rcp(dot(v, v));
-
-        // float t = dot((p - m_a), v)*scale;
-        // return min(1.f, max(0.f, t));
+        auto [phi, phi_p, d_phi] = angle_test(p);
+        if (phi_p > d_phi) return m_alt ? 1.f : 0.f;
+        if (phi_p < -d_phi) return m_alt ? 0.f : 1.f;
+        return (phi - m_phi_0) / (m_phi_1 - m_phi_0);
     }
 
-    std::pair<bool, float> ray_intersect(const Ray2f &ray) const override {
-        // float mint = ray.mint,
-        //       maxt = ray.maxt;
+    std::tuple<bool, float, float, size_t> ray_intersect(const Ray2f &ray) const override {
+        float mint = ray.mint,
+              maxt = ray.maxt;
 
-        // Vector2f v1 = ray.o - m_a,
-        //          v2 = m_b - m_a;
-        // Vector2f v3;
-        // if (cross(v1, v2) > 0) {
-        //     v3 = Vector2f(ray.d[1], -ray.d[0]);
-        // } else {
-        //     v3 = Vector2f(-ray.d[1], ray.d[0]);
-        // }
+        Vector2f o = Vector2f(ray.o) - m_center;
+        Vector2f d(ray.d);
 
-        // float denom = dot(v2, v3);
-        // if (denom == 0)
-        //     return { false, Infinity };
+        float A = squared_norm(d),
+              B = 2.0f * dot(o, d),
+              C = squared_norm(o) - m_arc_radius*m_arc_radius;
 
-        // float t1 = abs(cross(v2, v1)) / denom,
-        //       t2 = dot(v1, v3) / denom;
+        auto [solution_found, near_t, far_t] = solve_quadratic(A, B, C);
 
-        // if (t1 < mint || t1 > maxt || t2 < Epsilon || t2 > (1.f + Epsilon))
-        //     return { false, Infinity };
-        // return { true, t1 };
+        bool out_bounds = !((near_t <= maxt) && (far_t >= mint)),
+             in_bounds  = (near_t < mint) && (far_t > maxt);
+
+        bool valid_intersection = solution_found && (!out_bounds) && (!in_bounds);
+        if (!valid_intersection) {
+            return { false, Infinity, -1.f, 0 };
+        }
+
+        if (near_t >= mint) {
+            // Test near hit
+            Point2f p = ray(near_t);
+            p = m_center + normalize(p - m_center) * m_arc_radius;
+            auto [unused, phi_p, d_phi] = angle_test(p);
+            if (abs(phi_p) < d_phi) {
+                return { true, near_t, -1.f, 0 };
+            }
+        }
+        // Test far hit
+        Point2f p = ray(far_t);
+        p = m_center + normalize(p - m_center) * m_arc_radius;
+        auto [unused, phi_p, d_phi] = angle_test(p);
+        if (abs(phi_p) < d_phi) {
+            return { true, far_t, -1.f, 0 };
+        }
+
+        return { false, Infinity, -1.f, 0 };
     }
 
-    Interaction fill_interaction(const Ray2f &ray) const override {
-        // Interaction in;
-        // in.p = ray(in.rayt);
-        // in.s = normalize(m_b - m_a);
-        // in.n = Vector2f(-in.s[1], in.s[0]);
-        // in.dp_du = m_b - m_a;
-        // in.dn_du = Vector2f(0, 0);
-        // in.u = project(in.p);
-        // return in;
-    }
-
-    void flip() override {
-        std::swap(m_a, m_b);
+    Interaction fill_interaction(const Ray2f &ray, float spline_t, size_t spline_idx) const override {
+        Interaction in;
+        in.rayt = ray.maxt;
+        in.p = ray(in.rayt);
+        in.p = m_center + normalize(in.p - m_center) * m_arc_radius;
+        in.n = normalize(in.p - m_center);
+        Point2f p_local = in.p - m_center;
+        in.dp_du = (m_phi_1 - m_phi_0)*Vector2f(-p_local[1], p_local[0]);
+        in.dn_du = in.dp_du * rcp(m_arc_radius);
+        in.u = project(in.p);
+        in.s = Vector2f(-in.n[1], in.n[0]);
+        in.ds_du = Vector2f(-in.dn_du[1], in.dn_du[0]);
+        in.shape = this;
+        return in;
     }
 
     void draw(NVGcontext *ctx, bool hole=false) const override {
@@ -93,13 +158,14 @@ public:
 
         NVGcolor fill_color;
         if (type == Type::Reflection) {
-            fill_color = nvgRGB(235, 200, 91);
+            fill_color = COLOR_REFLECTION;
         } else if (type == Type::Refraction) {
-            fill_color = nvgRGBA(128, 200, 255, 128);
+            fill_color = COLOR_REFRACTION;
+        } else if (type == Type::Emitter) {
+            fill_color = COLOR_EMITTER;
         } else {
-            fill_color = nvgRGB(180, 180, 180);
+            fill_color = COLOR_DIFFUSE;
         }
-        NVGcolor transparent = nvgRGBA(0, 0, 0, 0);
 
         // The rounded rectangles and gradients behave inconsistently
         // when elements get too small in nanovg, so we work in a scaled coord.
@@ -126,6 +192,7 @@ public:
         // Another limitation of nanovg is that rectangles are always axis-aligned.
         // We need to do some more coordinate transforms to generalize.
         float phi = atan2(m_b[1] - m_a[1], m_b[0] - m_a[0]);
+        if (phi < 0.f) phi += 2.f*Pi;
         auto [sp, cp] = sincos(phi);
         float length = norm(m_b - m_a);
 
@@ -137,7 +204,7 @@ public:
                 bp = Si * Ri * m_b;
         float arc_radius = rcp(length) * m_arc_radius;
 
-        nvgStrokeWidth(ctx, nvg_scale*0.005f*rcp(length));
+        nvgStrokeWidth(ctx, nvg_scale*0.007f*rcp(length));
         nvgRotate(ctx, phi);
         nvgScale(ctx, length, length);
 
@@ -146,9 +213,9 @@ public:
                 p1 = p0 - Vector2f(0.f, gradient_start),
                 p2 = p1 - Vector2f(0.f, gradient_width);
         auto fill_grad   = nvgLinearGradientS(ctx, p1[0], p1[1], p2[0], p2[1],
-                                              fill_color, transparent);
+                                              fill_color, COLOR_TRANSPARENT);
         auto stroke_grad = nvgLinearGradientS(ctx, p1[0], p1[1], p2[0], p2[1],
-                                              nvgRGBA(0, 0, 0, 255), transparent);
+                                              nvgRGBA(0, 0, 0, 255), COLOR_TRANSPARENT);
         nvgFillPaint(ctx, fill_grad);
         nvgStrokePaint(ctx, stroke_grad);
 
@@ -156,7 +223,8 @@ public:
 
         // Main arc
         float offset = safe_sqrt(sqr(arc_radius) - 0.25f);
-        Point2f c_main = Point2f(ap[0] + 0.5f, bp[1] - offset);
+        float sign = m_alt ? -1.f : 1.f;
+        Point2f c_main = Point2f(ap[0] + 0.5f, bp[1] - sign*offset);
         float alpha = asin(0.5f*rcp(arc_radius));
 
         // Smaller arcs left and right to transition smoothly to vertical
@@ -169,10 +237,16 @@ public:
         if (beta_left < 0.f) beta_left += 2.f*Pi;
         if (beta_right < 0.f) beta_right += 2.f*Pi;
 
-        if (abs(beta_right) > Epsilon)
+        if (abs(beta_right) > Epsilon && !m_alt)
             nvgArcS(ctx, c_right[0], c_right[1], corner_radius, 0.f, beta_right, NVG_CW);
-        nvgArcS(ctx, c_main[0], c_main[1], arc_radius, 0.5f*Pi - alpha, 0.5f*Pi + alpha, NVG_CW);
-        if (abs(beta_left - Pi) > Epsilon)
+
+        if (m_alt) {
+            nvgArcS(ctx, c_main[0], c_main[1], arc_radius, 1.5f*Pi - alpha, 1.5f*Pi + alpha, NVG_CCW);
+        } else {
+            nvgArcS(ctx, c_main[0], c_main[1], arc_radius, 0.5f*Pi - alpha, 0.5f*Pi + alpha, NVG_CW);
+        }
+
+        if (abs(beta_left - Pi) > Epsilon && !m_alt)
             nvgArcS(ctx, c_left[0], c_left[1], corner_radius, beta_left, Pi, NVG_CW);
 
         // Rest of shape
@@ -200,7 +274,7 @@ public:
 
     std::string to_string() const override {
         std::ostringstream oss;
-        oss << "CircleSegment[" << std::endl
+        oss << "ConvexSegment[" << std::endl
             << "  a = " << m_a << "," << std::endl
             << "  b = " << m_b << std::endl
             << "]";
@@ -212,6 +286,7 @@ protected:
     float m_arc_radius;
     Point2f m_center;
     float m_phi_0, m_phi_1;
+    bool m_alt;
 
 public:
     float gradient_start = 0.01f,

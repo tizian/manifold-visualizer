@@ -1,4 +1,5 @@
 #include <interaction.h>
+#include <shape.h>
 
 std::string Interaction::to_string() const {
     std::ostringstream oss;
@@ -11,7 +12,7 @@ std::string Interaction::to_string() const {
         << "  dn_du = " << dn_du << "," << std::endl
         << "  u = " << u << "," << std::endl
         << "  eta = " << eta << "," << std::endl
-        // << "  shape = " << (shape == nullptr ? "null" : string::indent(shape->to_string())) << "," << std::endl
+        << "  shape = " << (shape == nullptr ? "null" : shape->to_string()) << "," << std::endl
         << "]";
     return oss.str();
 }

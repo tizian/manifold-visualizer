@@ -1,74 +1,16 @@
 import gc
 import numpy as np
 
-import ext.nanogui.nanogui as nanogui
-import ext.nanogui.nanogui.nanovg as nvg
-from ext.nanogui.nanogui import *
+import nanogui
+import nanogui.nanovg as nvg
+from nanogui import *
 
 import manifolds
-
-def draw_coord_system(ctx):
-    ctx.StrokeColor(nvg.RGB(0, 0, 0))
-    ctx.StrokeWidth(0.005)
-
-    for i in range(-100, 101):
-        ctx.BeginPath()
-        ctx.MoveTo(-1000.0, float(i))
-        ctx.LineTo(+1000.0, float(i))
-        ctx.Stroke()
-
-    for i in range(-100, 101):
-        ctx.BeginPath()
-        ctx.MoveTo(float(i), -1000.0)
-        ctx.LineTo(float(i), +1000.0)
-        ctx.Stroke()
-
-    ctx.StrokeWidth(0.01)
-
-    ctx.BeginPath()
-    ctx.MoveTo(-1000.0, 0.0)
-    ctx.LineTo(+1000.0, 0.0)
-    ctx.Stroke()
-
-    ctx.BeginPath()
-    ctx.MoveTo(0.0, -1000.0)
-    ctx.LineTo(0.0, +1000.0)
-    ctx.Stroke()
-
-def draw_vertex(ctx, vtx):
-    ctx.FillColor(nvg.RGB(0, 0, 0))
-    ctx.BeginPath()
-    ctx.Circle(vtx.p[0], vtx.p[1], 0.02)
-    ctx.Fill()
-
-def draw_normal(ctx, vtx, scale=1.0):
-    p0 = vtx.p
-    theta = np.arctan2(vtx.n[1], vtx.n[0])
-    p1 = p0 + vtx.n * 0.08 * scale
-
-    ctx.Save()
-    ctx.StrokeWidth(0.01)
-
-    ctx.BeginPath()
-    ctx.MoveTo(p0[0], p0[1])
-    ctx.LineTo(p1[0], p1[1])
-    ctx.Stroke()
-
-    ctx.Restore()
-
-    n_a = np.array([np.cos(theta+0.3), np.sin(theta+0.3)])
-    n_b = np.array([np.cos(theta-0.3), np.sin(theta-0.3)])
-    p_a = p0 + n_a * 0.07 * scale
-    p_b = p0 + n_b * 0.07 * scale
-    p_tip = p1 + vtx.n * 0.03 * scale
-
-    ctx.BeginPath()
-    ctx.MoveTo(p_tip[0], p_tip[1])
-    ctx.LineTo(p_a[0], p_a[1])
-    ctx.ArcTo(p1[0], p1[1], p_b[0], p_b[1], 0.03)
-    ctx.LineTo(p_b[0], p_b[1])
-    ctx.LineTo(p_tip[0], p_tip[1])
-    ctx.Fill()
+from misc import *
+from modes.trace_ray import *
+from modes.manifold_exploration import *
+from modes.specular_manifold_sampling import *
+from scenes import create_scenes
 
 class Input:
     def __init__(self, screen):
@@ -86,8 +28,7 @@ class Input:
 class ManifoldViewer(Screen):
     def __init__(self):
         super(ManifoldViewer, self).__init__((1024, 900), "Manifold 2D Viewer")
-        self.set_background(Color(150, 150, 150, 255))
-        self.time = 0.0
+        self.set_background(Color(200, 200, 200, 255))
 
         # Input & view
         self.zoom = 1.0
@@ -95,22 +36,100 @@ class ManifoldViewer(Screen):
         self.input = Input(self)
         self.input.scale = 1.0
 
+        # Scenes
+        self.scenes = create_scenes()
+        self.scene_idx = 0
+        scene = self.scenes[self.scene_idx]
+        self.offset = scene.offset
+        self.zoom   = scene.zoom
+
+        # Modes
+        self.modes = {}
+        mode_dicts = [
+            (ModeType.TraceRay, TraceRayMode),
+            (ModeType.ManifoldExploration, ManifoldExplorationMode),
+            (ModeType.SpecularManifoldSampling, SpecularManifoldSamplingMode)
+        ]
+        for mode, constructor in mode_dicts:
+            self.modes[mode] = constructor(self)
+            self.modes[mode].mode = mode
+        self.mode = ModeType.TraceRay
+
         # Interface
         self.window = Window(self, "Manifolds")
         self.window.set_position((15, 15))
         self.window.set_layout(GroupLayout())
 
-        # Scene
-        # self.shape = manifolds.Circle([0, 0], 0.8)
-        self.shape = manifolds.CircleSegment([-0.5, 0.5], [0.8, 0], 3.0)
-        # self.shape.flip()
-        self.shape.type = manifolds.Shape.Type.Reflection
+        ## Scene
+        Label(self.window, "Scene selection", "sans-bold")
+        scene_tools = Widget(self.window)
+        scene_tools.set_layout(BoxLayout(Orientation.Horizontal, Alignment.Middle, 0, 3))
+        ### Scene reset
+        scene_reset = Button(scene_tools, "", icons.FA_REDO_ALT)
+        def scene_reset_cb():
+            scene = self.scenes[self.scene_idx]
+            scene.start_u_current = scene.start_u_default
+            scene.start_angle_current = scene.start_angle_default
+            scene.end_u_current = scene.end_u_default
+            scene.spec_u_current = scene.spec_u_default
+            self.modes[self.mode].scene_reset()
+        scene_reset.set_callback(scene_reset_cb)
+        scene_reset.set_tooltip("Reset scene")
+        self.scene_reset_cb = scene_reset_cb
+        ### Scene selection
+        scene_selection = ComboBox(scene_tools, [s.name for s in self.scenes])
+        scene_selection.set_selected_index(self.scene_idx)
+        def scene_selection_cb(idx):
+            self.scene_idx = idx
+            scene = self.scenes[idx]
+            self.offset = scene.offset
+            self.zoom   = scene.zoom
+            self.modes[self.mode].scene_changed()
+        scene_selection.set_callback(scene_selection_cb)
+        self.scene_selection_cb = scene_selection_cb
 
+        self.modes[self.mode].enter(0)
+
+        # Options
+        Label(self.window, "Options", "sans-bold")
+        mode_selection = ComboBox(self.window, [
+            "Trace Ray",
+            "Manifold Exploration",
+            "Specular Manifold Sampling"
+        ])
+        mode_selection.set_selected_index(self.mode)
+        def mode_selection_cb(idx):
+            last_mode = self.mode
+            self.modes[last_mode].exit(self.modes[idx])
+            self.mode = ModeType(idx)
+            self.modes[self.mode].enter(self.modes[last_mode])
+            for g in self.mode_guis:
+                self.window.remove_child(g)
+            for w in self.mode_windows:
+                self.window.remove_child(w)
+            self.mode_guis, self.mode_windows = self.modes[self.mode].layout(self.window)
+            self.window.set_fixed_width(350)
+            self.perform_layout()
+        mode_selection.set_callback(mode_selection_cb)
+        self.mode_selection_cb = mode_selection_cb
+        self.mode_selection = mode_selection
+
+        self.window.set_fixed_width(350)
         self.perform_layout()
 
+        self.mode_guis = []
+        self.mode_windows = []
+        mode_selection_cb(self.mode)
+
+
     def keyboard_event(self, key, scancode, action, modifiers):
-        self.input.shift = modifiers == 1
-        self.input.alt   = modifiers == 4
+        self.input.shift = False
+        self.input.alt   = False
+        if action == glfw.PRESS:
+            if key == glfw.KEY_LEFT_SHIFT or key == glfw.KEY_RIGHT_SHIFT:
+                self.input.shift = True
+            elif key == glfw.KEY_LEFT_ALT or key == glfw.KEY_RIGHT_ALT:
+                self.input.alt = True
 
         if super(ManifoldViewer, self).keyboard_event(key, scancode, action, modifiers):
             return True
@@ -121,7 +140,33 @@ class ManifoldViewer(Screen):
         if key == glfw.KEY_SPACE and action == glfw.PRESS:
             print("offset: ", self.offset)
             print("zoom: ", self.zoom)
+            print("start_u: ", self.scenes[self.scene_idx].start_u_current)
+            print("start_angle: ", self.scenes[self.scene_idx].start_angle_current)
+            print("end_u: ", self.scenes[self.scene_idx].end_u_current)
+            print("spec_u: ", self.scenes[self.scene_idx].spec_u_current)
             return True
+
+        if key == glfw.KEY_1 and action == glfw.PRESS:
+            self.mode_selection_cb(ModeType.TraceRay)
+            self.mode_selection.set_selected_index(ModeType.TraceRay)
+            return True
+        elif key == glfw.KEY_2 and action == glfw.PRESS:
+            self.mode_selection_cb(ModeType.ManifoldExploration)
+            self.mode_selection.set_selected_index(ModeType.ManifoldExploration)
+            return True
+        elif key == glfw.KEY_3 and action == glfw.PRESS:
+            self.mode_selection_cb(ModeType.SpecularManifoldSampling)
+            self.mode_selection.set_selected_index(ModeType.SpecularManifoldSampling)
+            return True
+
+        if key == glfw.KEY_R and action == glfw.PRESS:
+            self.scene_reset_cb()
+            return True
+
+        if key == glfw.KEY_TAB and action == glfw.PRESS:
+            self.window.set_visible(not self.window.visible())
+
+        self.modes[self.mode].keyboard_event(key, scancode, action, modifiers)
 
         return False
 
@@ -151,7 +196,14 @@ class ManifoldViewer(Screen):
         return True
 
     def draw(self, ctx):
-        self.time += 0.01
+        if self.mode == ModeType.TraceRay:
+            self.set_caption("Manifold 2D Visualization - Trace Ray")
+        elif self.mode == ModeType.ManifoldExploration:
+            self.set_caption("Manifold 2D Visualization - Manifold Exploration")
+        elif self.mode == ModeType.SpecularManifoldSampling:
+            self.set_caption("Manifold 2D Visualization - Specular Manifold Sampling")
+        else:
+            self.set_caption("Manifold 2D Visualization")
 
         # Setup view transform
         size = self.size()
@@ -176,18 +228,11 @@ class ManifoldViewer(Screen):
         self.input.mouse_dp = new_mp - self.input.mouse_p
         self.input.mouse_p = new_mp
 
-
-        # draw_coord_system(ctx)
-
-        self.shape.draw(ctx, False)
-        sample = 0.5*(np.sin(self.time) + 1.0)
-        si = self.shape.sample_position(sample)
-
-        draw_vertex(ctx, si)
-        draw_normal(ctx, si)
+        scene = self.scenes[self.scene_idx]
+        self.modes[self.mode].update(self.input, scene)
+        self.modes[self.mode].draw(ctx, scene)
 
         self.input.mouse_dp = np.array([0.0, 0.0])
-
         ctx.ResetTransform()
         super(ManifoldViewer, self).draw(ctx)
 
