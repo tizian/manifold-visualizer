@@ -1,0 +1,12 @@
+[submodule "ext/enoki"]
+	path = ext/enoki
+	url = https://github.com/mitsuba-renderer/enoki.git
+[submodule "ext/--recursive"]
+	path = ext/--recursive
+	url = https://github.com/mitsuba-renderer/nanogui.git
+[submodule "ext/nanogui"]
+	path = ext/nanogui
+	url = https://github.com/mitsuba-renderer/nanogui.git
+[submodule "ext/pybind11"]
+	path = ext/pybind11
+	url = https://github.com/pybind/pybind11.git

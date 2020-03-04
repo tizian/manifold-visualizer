@@ -1,0 +1,6 @@
+/build
+/doc
+.DS_Store
+.ipynb_checkpoints/
+TODO.md
+*.ipynb
