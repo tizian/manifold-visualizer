@@ -66,9 +66,10 @@ enoki_set_compile_flags()
 enoki_set_native_flags()
 
 # Add nanogui
-set(NANOGUI_BUILD_EXAMPLE OFF CACHE BOOL " " FORCE)
-set(NANOGUI_BUILD_PYTHON  ON  CACHE BOOL " " FORCE)
-set(NANOGUI_INSTALL       ON  CACHE BOOL " " FORCE)
+set(NANOGUI_BUILD_EXAMPLES ON  CACHE BOOL " " FORCE)
+set(NANOGUI_BUILD_PYTHON   ON  CACHE BOOL " " FORCE)
+set(NANOGUI_INSTALL        OFF CACHE BOOL " " FORCE)
+set(NANOGUI_PYBIND11_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/ext/pybind11")
 add_subdirectory(ext/nanogui)
 set_property(TARGET glfw glfw_objects nanogui PROPERTY FOLDER "dependencies")
 
@@ -102,6 +103,9 @@ set(PYBIND11_CPP_STANDARD "-std=c++17")
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ext/pybind11)
 pybind11_add_module(manifolds
     ${CMAKE_CURRENT_SOURCE_DIR}/src/python/python.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/python/ray.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/python/interaction.cpp    ${CMAKE_CURRENT_SOURCE_DIR}/src/interaction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/python/shape.cpp          ${CMAKE_CURRENT_SOURCE_DIR}/src/shape.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/python/scene.cpp          ${CMAKE_CURRENT_SOURCE_DIR}/src/scene.cpp
 )
+target_link_libraries(manifolds PRIVATE nanogui ${NANOGUI_EXTRA_LIBS})

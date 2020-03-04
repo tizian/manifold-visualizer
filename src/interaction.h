@@ -11,9 +11,6 @@ struct Interaction {
     // Position of the interaction
     Point2f p;
 
-    // Tangent
-    Vector2f s;
-
     // Normal
     Vector2f n;
 
@@ -23,15 +20,26 @@ struct Interaction {
     // Normal partial derivative w.r.t. the local parameterization
     Vector2f dn_du;
 
+    // Tangent
+    Vector2f s;
+
+    // Tangent derivative
+    Vector2f ds_du;
+
+    // Offset normal (for rough variations)
+    Vector2f n_offset;
+
     // Hit position in local parameterization
     float u;
 
     // Relative index of refraction at the interaction
-    float eta = 1.f;
+    float eta;
 
     // Associated shape
     const Shape *shape = nullptr;
 
     // String representation
     std::string to_string() const;
+
+    bool is_valid() const { return rayt < Infinity; }
 };

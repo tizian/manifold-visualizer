@@ -17,6 +17,14 @@ constexpr float Epsilon      = 1e-3f;
 constexpr float Infinity     = std::numeric_limits<float>::infinity();
 constexpr float MaxFloat     = std::numeric_limits<float>::max();
 
+#include <nanovg.h>
+
+static const NVGcolor COLOR_REFLECTION  = nvgRGB(240, 200, 91);
+static const NVGcolor COLOR_REFRACTION  = nvgRGBA(128, 200, 255, 128);
+static const NVGcolor COLOR_EMITTER     = nvgRGB(255, 255, 180);
+static const NVGcolor COLOR_DIFFUSE     = nvgRGB(120, 120, 120);
+static const NVGcolor COLOR_TRANSPARENT = nvgRGBA(0, 0, 0, 0);
+
 #define TERM_COLOR_RED    "\x1B[31m"
 #define TERM_COLOR_YELLOW "\x1B[33m"
 #define TERM_COLOR_WHITE  "\x1B[37m"

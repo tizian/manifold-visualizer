@@ -6,17 +6,26 @@
 class LinearSegment : public Shape {
 public:
     LinearSegment(const Point2f &a, const Point2f &b)
-        : Shape(), m_a(a), m_b(b) { }
+        : Shape(), m_a(a), m_b(b) {
+        name = "LinearSegment";
+
+        bbox = BoundingBox2f();
+        bbox.expand(m_a);
+        bbox.expand(m_b);
+    }
 
     Interaction sample_position(float sample) const override {
         Interaction in;
+        in.rayt = 0;
         in.p = m_a + (m_b - m_a)*sample;
-        in.s = normalize(m_b - m_a);
-        in.n = Vector2f(-in.s[1], in.s[0]);
+        Vector2f dir = normalize(m_b - m_a);
+        in.n = Vector2f(-dir[1], dir[0]);
         in.dp_du = m_b - m_a;
         in.dn_du = Vector2f(0, 0);
-        in.shape = this;
         in.u = sample;
+        in.s = Vector2f(-in.n[1], in.n[0]);
+        in.ds_du = Vector2f(-in.dn_du[1], in.dn_du[0]);
+        in.shape = this;
         return in;
     }
 
@@ -28,7 +37,7 @@ public:
         return min(1.f, max(0.f, t));
     }
 
-    std::pair<bool, float> ray_intersect(const Ray2f &ray) const override {
+    std::tuple<bool, float, float, size_t> ray_intersect(const Ray2f &ray) const override {
         float mint = ray.mint,
               maxt = ray.maxt;
 
@@ -43,24 +52,28 @@ public:
 
         float denom = dot(v2, v3);
         if (denom == 0)
-            return { false, Infinity };
+            return { false, Infinity, -1.f, 0 };
 
         float t1 = abs(cross(v2, v1)) / denom,
               t2 = dot(v1, v3) / denom;
 
         if (t1 < mint || t1 > maxt || t2 < Epsilon || t2 > (1.f + Epsilon))
-            return { false, Infinity };
-        return { true, t1 };
+            return { false, Infinity, -1.f, 0 };
+        return { true, t1, -1.f, 0 };
     }
 
-    Interaction fill_interaction(const Ray2f &ray) const override {
+    Interaction fill_interaction(const Ray2f &ray, float spline_t, size_t spline_idx) const override {
         Interaction in;
+        in.rayt = ray.maxt;
         in.p = ray(in.rayt);
-        in.s = normalize(m_b - m_a);
-        in.n = Vector2f(-in.s[1], in.s[0]);
+        Vector2f dir = normalize(m_b - m_a);
+        in.n = Vector2f(-dir[1], dir[0]);
         in.dp_du = m_b - m_a;
         in.dn_du = Vector2f(0, 0);
         in.u = project(in.p);
+        in.s = Vector2f(-in.n[1], in.n[0]);
+        in.ds_du = Vector2f(-in.dn_du[1], in.dn_du[0]);
+        in.shape = this;
         return in;
     }
 
@@ -76,13 +89,14 @@ public:
 
         NVGcolor fill_color;
         if (type == Type::Reflection) {
-            fill_color = nvgRGB(235, 200, 91);
+            fill_color = COLOR_REFLECTION;
         } else if (type == Type::Refraction) {
-            fill_color = nvgRGBA(128, 200, 255, 128);
+            fill_color = COLOR_REFRACTION;
+        } else if (type == Type::Emitter) {
+            fill_color = COLOR_EMITTER;
         } else {
-            fill_color = nvgRGB(180, 180, 180);
+            fill_color = COLOR_DIFFUSE;
         }
-        NVGcolor transparent = nvgRGBA(0, 0, 0, 0);
 
         // The rounded rectangles and gradients behave inconsistently
         // when elements get too small in nanovg, so we work in a scaled coord.
@@ -117,7 +131,7 @@ public:
         ap -= Vector2f(corner_radius, 0.f);
         bp -= Vector2f(corner_radius, 0.f);
 
-        nvgStrokeWidth(ctx, nvg_scale*0.005f*rcp(length));
+        nvgStrokeWidth(ctx, nvg_scale*0.007f*rcp(length));
         nvgRotate(ctx, phi);
         nvgScale(ctx, length, length);
 
@@ -126,15 +140,14 @@ public:
                 p1 = p0 - Vector2f(0.f, gradient_start),
                 p2 = p1 - Vector2f(0.f, gradient_width);
         auto fill_grad   = nvgLinearGradientS(ctx, p1[0], p1[1], p2[0], p2[1],
-                                              fill_color, transparent);
+                                              fill_color, COLOR_TRANSPARENT);
         auto stroke_grad = nvgLinearGradientS(ctx, p1[0], p1[1], p2[0], p2[1],
-                                              nvgRGBA(0, 0, 0, 255), transparent);
+                                              nvgRGBA(0, 0, 0, 255), COLOR_TRANSPARENT);
         nvgFillPaint(ctx, fill_grad);
         nvgStrokePaint(ctx, stroke_grad);
 
         nvgBeginPath(ctx);
 
-        float height = 1.f;
         nvgRectS(ctx, ap[0], ap[1], 1.f, -height, corner_radius);
         nvgFill(ctx);
         nvgStroke(ctx);
@@ -161,6 +174,7 @@ protected:
     Point2f m_a, m_b;
 
 public:
+    float height = 1.f;
     float gradient_start = 0.04f,
           gradient_width = 0.03f;
     float corner_radius = 0.04f;

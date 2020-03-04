@@ -6,7 +6,13 @@
 class Circle : public Shape {
 public:
     Circle(const Point2f &center, float radius)
-        : Shape(), m_center(center), m_radius(radius) {}
+        : Shape(), m_center(center), m_radius(radius) {
+        name = "Circle";
+
+        bbox = BoundingBox2f();
+        bbox.min = m_center - Vector2f(m_radius);
+        bbox.max = m_center + Vector2f(m_radius);
+    }
 
     Interaction sample_position(float sample) const override {
         float phi = 2.f*Pi*sample;
@@ -14,9 +20,9 @@ public:
         Point2f p_local(cp, sp);
 
         Interaction in;
+        in.rayt = 0;
         in.p = m_center + m_radius*p_local;
         in.n = p_local;
-        in.s = Vector2f(-in.n[1], in.n[0]);
         in.dp_du = 2.f*Pi*Vector2f(-p_local[1], p_local[0]);
         float inv_radius = (m_flipped ? -1.f : 1.f) * rcp(m_radius);
         in.dn_du = in.dp_du*inv_radius;
@@ -24,18 +30,20 @@ public:
             in.n *= -1.f;
         }
         in.u = sample;
+        in.s = Vector2f(-in.n[1], in.n[0]);
+        in.ds_du = Vector2f(-in.dn_du[1], in.dn_du[0]);
         in.shape = this;
         return in;
     }
 
     float project(const Point2f &p) const override {
-        Vector2f d = p - m_center;
+        Vector2f d = normalize(p - m_center);
         float phi = atan2(d.y(), d.x());
         if (phi < 0.f) phi += 2.f*Pi;
         return phi*InvTwoPi;
     }
 
-    std::pair<bool, float> ray_intersect(const Ray2f &ray) const override {
+    std::tuple<bool, float, float, size_t> ray_intersect(const Ray2f &ray) const override {
         float mint = ray.mint,
               maxt = ray.maxt;
 
@@ -54,25 +62,26 @@ public:
         bool valid_intersection = solution_found && (!out_bounds) && (!in_bounds);
         float t = near_t < mint ? far_t : near_t;
 
-        return { valid_intersection, t };
+        return { valid_intersection, t, -1.f, 0 };
     }
 
-    Interaction fill_interaction(const Ray2f &ray) const override {
+    Interaction fill_interaction(const Ray2f &ray, float spline_t, size_t spline_idx) const override {
         Interaction in;
+        in.rayt = ray.maxt;
         in.p = ray(in.rayt);
         in.p = m_center + normalize(in.p - m_center) * m_radius;
         in.n = normalize(in.p - m_center);
-        in.s = Vector2f(-in.n[1], in.n[0]);
         Point2f p_local = in.p - m_center;
         in.dp_du = 2.f*Pi*Vector2f(-p_local[1], p_local[0]);
-
-        float inv_radius = (m_flipped ? -1.f : 1.f) * rcp(m_radius);
-        in.dn_du = in.dp_du * inv_radius;
-        in.u = project(in.p);
-
         if (m_flipped) {
             in.n = -in.n;
         }
+        float inv_radius = (m_flipped ? -1.f : 1.f) * rcp(m_radius);
+        in.dn_du = in.dp_du * inv_radius;
+        in.u = project(in.p);
+        in.s = Vector2f(-in.n[1], in.n[0]);
+        in.ds_du = Vector2f(-in.dn_du[1], in.dn_du[0]);
+        in.shape = this;
         return in;
     }
 
