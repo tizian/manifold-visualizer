@@ -1,8 +1,8 @@
 /build
-/doc
 .DS_Store
 .ipynb_checkpoints/
 TODO.md
 *.ipynb
 *__pycache__*
 *.svg
+/header-video
