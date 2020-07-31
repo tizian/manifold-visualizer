@@ -29,9 +29,16 @@ class SpecularManifoldSamplingMode(Mode):
         self.knob_end   = DraggableKnob()
         self.knob_spec  = DraggableKnob()
 
+        self.n_bounces_box = None
+
         self.animating = False
         self.time = 0.0
         self.scene = None
+
+    def enter(self, last):
+        super().enter(last)
+        if self.n_bounces_box:
+            self.n_bounces_box.set_value(self.scene.n_bounces_default)
 
     def scene_changed(self):
         scene = self.viewer.scenes[self.viewer.scene_idx]
@@ -273,7 +280,8 @@ class SpecularManifoldSamplingMode(Mode):
         Label(strategy_tools, "  N=")
         self.n_bounces_box = IntBox(strategy_tools)
         self.n_bounces_box.set_fixed_size((50, 20))
-        self.n_bounces_box.set_value(1)
+        scene = self.viewer.scenes[self.viewer.scene_idx]
+        self.n_bounces_box.set_value(scene.n_bounces_default)
         self.n_bounces_box.set_default_value("1")
         self.n_bounces_box.set_font_size(20)
         self.n_bounces_box.set_spinnable(True)

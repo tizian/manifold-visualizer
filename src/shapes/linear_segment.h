@@ -153,12 +153,6 @@ public:
         nvgStroke(ctx);
 
         nvgRestore(ctx);
-
-        // nvgBeginPath(ctx);
-        // nvgStrokeColor(ctx, nvgRGB(255, 0, 0));
-        // nvgMoveTo(ctx, m_a[0], m_a[1]);
-        // nvgLineTo(ctx, m_b[0], m_b[1]);
-        // nvgStroke(ctx);
     }
 
     std::string to_string() const override {
