@@ -226,7 +226,12 @@ class Path():
         if valid_refr_i:
             po  = angle(wo)
             pio = angle(wio)
-            C = po - pio
+            C = po - dpi
+            # Take care of periodicity
+            if C < -np.pi:
+                C += 2*np.pi
+            elif C > np.pi:
+                C -= 2*np.pi
 
             # Derivative of specular constraint w.r.t. u_{i-1}
             dwi_du_prev = ili * (self.vertices[k-1].dp_du - wi*dot(wi, self.vertices[k-1].dp_du))
